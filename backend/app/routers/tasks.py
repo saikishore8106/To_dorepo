@@ -25,27 +25,6 @@ router = APIRouter(prefix="/api/tasks", tags=["Tasks"])
 
 
 
-
-"""
-
-POST - KALYAN, USA
-
-PUT - KALYAN REDDY, USA
-
-PATCH - KALYAN REDDY
-
-
-GET - DATA BRING (ALL)
-POST - DATA CREATE (AUTOMATCI ID )
-DELETE - ID 
-PATH/PUT - id
-
-
-
-"""
-
-
-
 @router.get("/", response_model=schemas.TaskListResponse)
 def list_tasks(
     page: int = Query(1, ge=1),
