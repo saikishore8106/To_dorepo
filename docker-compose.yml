@@ -1,0 +1,71 @@
+# ─────────────────────────────────────────────
+# docker-compose.yml — Full Stack Orchestration
+# ─────────────────────────────────────────────
+# 
+# Runs 3 services:
+#   db       → PostgreSQL database
+#   backend  → FastAPI Python app
+#   frontend → React app (nginx)
+#
+# Concepts:
+# - Service networking (backend talks to db via service name "db")
+# - Health checks (backend waits for DB to be ready)
+# - Volume mounts (PostgreSQL data persists across restarts)
+# - Environment variable injection
+# - Port mapping (host:container)
+
+services:
+
+  # ── PostgreSQL Database ──────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: taskdb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: taskdb
+    volumes:
+      # Named volume: data persists even after `docker-compose down`
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI Backend ──────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: taskapi
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/taskdb
+      SECRET_KEY: "change-this-in-production-use-a-long-random-string"
+      ACCESS_TOKEN_EXPIRE_MINUTES: 60
+    ports:
+      - "8001:8001"
+    depends_on:
+      db:
+        condition: service_healthy  # Wait for PostgreSQL to be ready!
+    volumes:
+      - ./backend:/app  # Hot-reload: source code synced to container
+
+  # ── React Frontend ───────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: taskreact
+    restart: unless-stopped
+    ports:
+      - "5173:80"     # nginx serves on 80 inside, mapped to 5173 on host
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:   # Persisted PostgreSQL data volume
