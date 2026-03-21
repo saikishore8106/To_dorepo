@@ -37,6 +37,7 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
               "set -e",
+              "git config --global --add safe.directory /home/ubuntu/app",
               "cd /home/ubuntu/app",
               "git fetch origin main",
               "git reset --hard origin/main",
