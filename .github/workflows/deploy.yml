@@ -26,6 +26,7 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
+          audience: sts.amazonaws.com
 
       # ── 3. Send deploy command to EC2 via SSM (no SSH key required) ──────
       - name: Deploy on EC2 via SSM
