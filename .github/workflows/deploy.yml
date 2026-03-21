@@ -37,6 +37,7 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
               "set -e",
+              "export HOME=/root",
               "git config --global --add safe.directory /home/ubuntu/app",
               "cd /home/ubuntu/app",
               "git fetch origin main",
