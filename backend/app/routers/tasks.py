@@ -21,10 +21,6 @@ from ..auth import get_current_user
 
 router = APIRouter(prefix="/api/tasks", tags=["Tasks"])
 
-# http://codenetra.com/api/tasks/1
-
-
-
 @router.get("/", response_model=schemas.TaskListResponse)
 def list_tasks(
     page: int = Query(1, ge=1),
