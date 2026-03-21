@@ -23,6 +23,16 @@ export default function Navbar({ user }) {
         <div className="navbar-brand">
           <div className="brand-icon">✅</div>
           <span>Task Manager Pro</span>
+          <span style={{
+            fontSize: "0.7rem",
+            background: "#22c55e",
+            color: "#fff",
+            borderRadius: "999px",
+            padding: "2px 10px",
+            marginLeft: "10px",
+            fontWeight: 600,
+            letterSpacing: "0.05em"
+          }}>Auto Deployed 🚀</span>
         </div>
 
         {/* Right side */}
