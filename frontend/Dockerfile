@@ -12,6 +12,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci
 
+# Accept build arg and expose as env var for Vite
+ARG VITE_API_URL
+ENV VITE_API_URL=$VITE_API_URL
+
 # Copy source and build for production
 COPY . .
 RUN npm run build
