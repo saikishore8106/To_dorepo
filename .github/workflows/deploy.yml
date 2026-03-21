@@ -37,7 +37,7 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --parameters 'commands=[
               "set -e",
-              "cd /home/ec2-user/app",
+              "cd /home/ubuntu/app",
               "git fetch origin main",
               "git reset --hard origin/main",
               "docker compose pull --ignore-pull-failures || true",
