@@ -52,8 +52,6 @@ services:
     depends_on:
       db:
         condition: service_healthy  # Wait for PostgreSQL to be ready!
-    volumes:
-      - ./backend:/app  # Hot-reload: source code synced to container
 
   # ── React Frontend ───────────────────────────────────
   frontend:
