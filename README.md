@@ -7,7 +7,7 @@ A **full-stack project** designed to cover all key skills for a Senior Python De
 ## 🛠️ Tech Stack
 - **Backend**: Python 3, FastAPI, PostgreSQL, SQLAlchemy ORM, JWT Auth, APScheduler (Background Jobs)
 - **Frontend**: React, Vite, Axios, React Router, Custom CSS (Glassmorphism & Dark Mode)
-- **DevOps**: Docker, Docker Compose, GitHub Actions (CI/CD pipeline configuration)
+- **DevOps**: Docker, Docker Compose, GitHub Actions (CI/CD), AWS EC2 + SSM (zero SSH-key deploy)
 
 ---
 
@@ -50,7 +50,7 @@ cd backend
 python3 -m venv venv
 source venv/bin/activate
 
-# Install requirements (includes the passlib+bcrypt version fix!)
+# Install requirements
 pip install -r requirements.txt
 
 # Start the FastAPI server
@@ -69,6 +69,20 @@ npm install
 npm run dev
 ```
 *(Open http://127.0.0.1:5173 in your web browser)*
+
+---
+
+## 🧪 Running Tests
+
+Tests use an in-memory SQLite database so no PostgreSQL is needed.
+
+```bash
+cd backend
+pip install -r requirements.txt
+pytest tests/ -v --tb=short
+```
+
+> **Note:** `pytest.ini` at the backend root sets `pythonpath = .` so pytest can resolve the `app` module when run from the `backend/` directory.
 
 ---
 
@@ -94,7 +108,7 @@ GitHub Actions (ubuntu-latest)
 
 ---
 
-### One-time AWS setup (do this once)
+### One-time AWS Setup (do this once)
 
 #### Step 1 — Add GitHub as an OIDC identity provider in AWS IAM
 
@@ -114,7 +128,7 @@ GitHub Actions (ubuntu-latest)
    ```
    token.actions.githubusercontent.com:sub  StringLike  repo:YOUR_GITHUB_USERNAME/YOUR_REPO_NAME:ref:refs/heads/main
    ```
-6. Attach the following inline policy (replace `REGION` and `ACCOUNT_ID`):
+6. Attach an inline policy (replace `REGION` and `ACCOUNT_ID`):
    ```json
    {
      "Version": "2012-10-17",
@@ -122,67 +136,122 @@ GitHub Actions (ubuntu-latest)
        {
          "Effect": "Allow",
          "Action": [
-           "ssm:SendCommand",
+           "ssm:SendCommand"
+         ],
+         "Resource": [
+           "arn:aws:ec2:REGION:ACCOUNT_ID:instance/*",
+           "arn:aws:ssm:REGION::document/AWS-RunShellScript"
+         ]
+       },
+       {
+         "Effect": "Allow",
+         "Action": [
            "ssm:GetCommandInvocation",
            "ssm:ListCommandInvocations"
          ],
-         "Resource": [
-           "arn:aws:ssm:REGION::document/AWS-RunShellScript",
-           "arn:aws:ec2:REGION:ACCOUNT_ID:instance/*",
-           "arn:aws:ssm:REGION:ACCOUNT_ID:*"
-         ]
+         "Resource": "*"
        }
      ]
    }
    ```
-7. Name the role (e.g. `github-actions-deploy`) and save.
-   Copy the **Role ARN** — you will need it in step 4.
+   > Name the inline policy using only alphanumeric characters and hyphens (e.g. `github-actions-ssm-policy`).
+
+7. Name the role `github-actions-deploy` and save. Copy the **Role ARN** — you need it in Step 4.
+
+> **Trust policy gotcha:** The `sub` condition must use the short repo format — `repo:owner/repo-name:ref:refs/heads/main` — not a full GitHub URL.
 
 #### Step 3 — Prepare the EC2 instance
 
-The EC2 instance needs Docker, Docker Compose, the SSM agent, and the repo cloned.
+The EC2 instance needs Docker, the SSM agent running, an IAM instance profile, and the repo cloned.
+
+**3a. Create an IAM instance profile for EC2**
+
+1. **IAM → Roles → Create role**
+2. Trusted entity: **AWS service → EC2**
+3. Attach managed policy: `AmazonSSMManagedInstanceCore`
+4. Name it `ec2-ssm-role` and save
+
+**3b. Attach the role to your EC2 instance**
+
+1. **EC2 → Instances → select your instance**
+2. **Actions → Security → Modify IAM role**
+3. Select `ec2-ssm-role` → **Update IAM role**
+
+**3c. Install and start the SSM agent on Ubuntu**
 
 ```bash
-# On your EC2 instance (Amazon Linux 2023 / Ubuntu 22.04)
+# Install SSM agent (Ubuntu)
+sudo snap install amazon-ssm-agent --classic
+sudo systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent.service
+sudo systemctl start snap.amazon-ssm-agent.amazon-ssm-agent.service
 
-# 1. Install SSM agent (already installed on Amazon Linux 2; Ubuntu may need it)
-sudo snap install amazon-ssm-agent --classic   # Ubuntu
-# or:
-sudo yum install -y amazon-ssm-agent && sudo systemctl enable --now amazon-ssm-agent
+# Verify it is running
+sudo systemctl status snap.amazon-ssm-agent.amazon-ssm-agent.service
+```
 
-# 2. Install Docker
-sudo yum install -y docker || sudo apt-get install -y docker.io
+After starting, wait ~2 minutes then verify the instance appears in **Systems Manager → Fleet Manager**.
+
+**3d. Install Docker and Docker Compose**
+
+```bash
+# Install Docker
+sudo apt-get update
+sudo apt-get install -y docker.io
 sudo systemctl enable --now docker
-sudo usermod -aG docker ec2-user   # so the ssm user can run docker
 
-# 3. Install Docker Compose plugin
+# Install Docker Compose plugin
 sudo mkdir -p /usr/local/lib/docker/cli-plugins
 sudo curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 \
   -o /usr/local/lib/docker/cli-plugins/docker-compose
 sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
-
-# 4. Attach an IAM instance profile with AmazonSSMManagedInstanceCore
-#    (do this in the EC2 console: Actions → Security → Modify IAM role)
-
-# 5. Clone the repo
-sudo mkdir -p /home/ec2-user/app
-sudo chown ec2-user:ec2-user /home/ec2-user/app
-git clone https://github.com/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME.git /home/ec2-user/app
 ```
 
-> **IAM instance profile for SSM** — create a role with the `AmazonSSMManagedInstanceCore` managed policy and attach it to the EC2 instance.
+**3e. Clone the repo**
+
+```bash
+git clone https://github.com/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME.git /home/ubuntu/app
+```
 
 #### Step 4 — Add GitHub repository secrets
 
 Go to your GitHub repo → **Settings → Secrets and variables → Actions** → **New repository secret**:
 
-| Secret name | Value |
-|---|---|
-| `AWS_ROLE_ARN` | `arn:aws:iam::ACCOUNT_ID:role/github-actions-deploy` |
-| `AWS_REGION` | e.g. `us-east-1` |
-| `EC2_INSTANCE_ID` | e.g. `i-0abc123def456789` |
+| Secret name | Value | Notes |
+|---|---|---|
+| `AWS_ROLE_ARN` | `arn:aws:iam::ACCOUNT_ID:role/github-actions-deploy` | |
+| `AWS_REGION` | e.g. `us-east-2` | Use the **region** (e.g. `us-east-2`), not the availability zone (e.g. `us-east-2c`) |
+| `EC2_INSTANCE_ID` | e.g. `i-0abc123def456789` | Found in EC2 console |
+
+> **Common mistake:** Setting `AWS_REGION` to an availability zone (like `us-east-2c`) instead of the region (`us-east-2`) causes a DNS failure when the action tries to reach `sts.us-east-2c.amazonaws.com`.
 
 That's it. Push to `main` and the workflow runs automatically.
+
+---
+
+### Accessing the deployed app
+
+Once the workflow succeeds:
+
+| Service | URL |
+|---|---|
+| Frontend UI | `http://<EC2_PUBLIC_DNS>:5173` |
+| Backend API | `http://<EC2_PUBLIC_DNS>:8001` |
+| API Docs | `http://<EC2_PUBLIC_DNS>:8001/docs` |
+
+Make sure your EC2 **Security Group inbound rules** allow traffic on ports `5173` and `8001`.
+
+---
+
+### Troubleshooting common deploy errors
+
+| Error | Cause | Fix |
+|---|---|---|
+| `ENOTFOUND sts.***.amazonaws.com` | `AWS_REGION` secret is wrong or is an AZ not a region | Set `AWS_REGION` to the region only, e.g. `us-east-2` |
+| `Could not assume role with OIDC` | IAM trust policy `sub` contains full GitHub URL | Use `repo:owner/repo-name:ref:refs/heads/main` (no URL, no `.git`) |
+| `AccessDeniedException: ssm:SendCommand` | GitHub Actions IAM role missing SSM permissions | Add the inline policy from Step 2 above |
+| `InvalidInstanceId` | EC2 instance not registered with SSM | Attach `ec2-ssm-role` with `AmazonSSMManagedInstanceCore` to the instance and restart the SSM agent |
+| `fatal: $HOME not set` | SSM runs commands as root without a full environment | `export HOME=/root` is set at the start of the deploy script |
+| `fatal: detected dubious ownership` | SSM runs as root but repo is owned by `ubuntu` | `git config --global --add safe.directory /home/ubuntu/app` is set in the deploy script |
 
 ---
 
@@ -204,3 +273,4 @@ gh run view <run-id> --log
 4. **Python Automation** — `APScheduler` background job that automatically scans for overdue tasks every 60 minutes.
 5. **Modern Frontend** — React hook state management, Axios global interceptors (for auto-attaching tokens), and protected routing.
 6. **Containerization** — Multi-stage builds in Dockerfiles separating frontend build steps from serving steps for an ultra-lean final image.
+7. **Zero-credential CI/CD** — GitHub OIDC + AWS SSM replaces stored AWS keys and SSH keys entirely.
