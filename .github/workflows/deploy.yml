@@ -1,0 +1,65 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+# Permissions required for GitHub OIDC token (no stored AWS keys)
+permissions:
+  id-token: write   # needed to request the OIDC JWT
+  contents: read    # needed to checkout the code
+
+jobs:
+  deploy:
+    name: Build & Deploy via SSM
+    runs-on: ubuntu-latest
+
+    steps:
+      # ── 1. Checkout code ─────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── 2. Authenticate to AWS via OIDC (zero stored credentials) ────────
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      # ── 3. Send deploy command to EC2 via SSM (no SSH key required) ──────
+      - name: Deploy on EC2 via SSM
+        id: ssm
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids "${{ secrets.EC2_INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --parameters 'commands=[
+              "set -e",
+              "cd /home/ec2-user/app",
+              "git fetch origin main",
+              "git reset --hard origin/main",
+              "docker compose pull --ignore-pull-failures || true",
+              "docker compose up --build -d",
+              "docker compose ps"
+            ]' \
+            --timeout-seconds 300 \
+            --query "Command.CommandId" \
+            --output text)
+          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+
+      # ── 4. Wait for the command to finish and surface the output ─────────
+      - name: Wait for SSM command
+        run: |
+          aws ssm wait command-executed \
+            --command-id "${{ steps.ssm.outputs.command_id }}" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}"
+
+      - name: Print deploy output
+        if: always()
+        run: |
+          aws ssm get-command-invocation \
+            --command-id "${{ steps.ssm.outputs.command_id }}" \
+            --instance-id "${{ secrets.EC2_INSTANCE_ID }}" \
+            --query "[StandardOutputContent, StandardErrorContent]" \
+            --output text
